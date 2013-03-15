@@ -1,0 +1,49 @@
+diff --git a/pixman/pixman-private.h b/pixman/pixman-private.h
+index c0a6bc0..2f0edfb 100644
+--- a/pixman/pixman-private.h
++++ b/pixman/pixman-private.h
+@@ -765,12 +765,6 @@ get_implementation (void)
+     return global_implementation;
+ }
+ 
+-/* This function is exported for the sake of the test suite and not part
+- * of the ABI.
+- */
+-PIXMAN_EXPORT pixman_implementation_t *
+-_pixman_internal_only_get_implementation (void);
+-
+ /* Memory allocation helpers */
+ void *
+ pixman_malloc_ab (unsigned int n, unsigned int b);
+diff --git a/pixman/pixman-utils.c b/pixman/pixman-utils.c
+index b1e9fb6..9245760 100644
+--- a/pixman/pixman-utils.c
++++ b/pixman/pixman-utils.c
+@@ -283,15 +283,6 @@ pixman_region32_copy_from_region16 (pixman_region32_t *dst,
+     return retval;
+ }
+ 
+-/* This function is exported for the sake of the test suite and not part
+- * of the ABI.
+- */
+-PIXMAN_EXPORT pixman_implementation_t *
+-_pixman_internal_only_get_implementation (void)
+-{
+-    return get_implementation ();
+-}
+-
+ #ifdef DEBUG
+ 
+ void
+diff --git a/test/Makefile.sources b/test/Makefile.sources
+index 0778971..0f34411 100644
+--- a/test/Makefile.sources
++++ b/test/Makefile.sources
+@@ -4,7 +4,6 @@ TESTPROGRAMS =			\
+ 	pdf-op-test		\
+ 	region-test		\
+ 	region-translate-test	\
+-	combiner-test		\
+ 	fetch-test		\
+ 	rotate-test		\
+ 	oob-test		\

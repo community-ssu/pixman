@@ -1,0 +1,2 @@
+00-unexport-symbol.diff
+01-do-not-use-system-pixman.diff

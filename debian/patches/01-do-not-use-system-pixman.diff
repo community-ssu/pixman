@@ -1,0 +1,13 @@
+diff --git a/configure.ac b/configure.ac
+index d23054f..77ea792 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -786,7 +786,7 @@ if test $enable_gtk = auto ; then
+ fi
+ 
+ if test $enable_gtk = auto ; then
+-   PKG_CHECK_MODULES(GTK, [gtk+-2.0 pixman-1], [enable_gtk=yes], [enable_gtk=no])
++   PKG_CHECK_MODULES(GTK, [gtk+-2.0], [enable_gtk=yes], [enable_gtk=no])
+ fi
+ 
+ AM_CONDITIONAL(HAVE_GTK, [test "x$enable_gtk" = xyes])
