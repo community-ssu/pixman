@@ -1,0 +1,426 @@
+Index: pixman/pixman/pixman-image.c
+===================================================================
+--- pixman.orig/pixman/pixman-image.c	2013-03-17 19:01:15.000000000 +0200
++++ pixman/pixman/pixman-image.c	2013-03-17 19:01:25.000000000 +0200
+@@ -238,27 +238,54 @@
+     image->common.have_clip_region = FALSE;
+ }
+ 
+-/* Executive Summary: This function is a no-op that only exists
+- * for historical reasons.
+- *
+- * There used to be a bug in the X server where it would rely on
+- * out-of-bounds accesses when it was asked to composite with a
+- * window as the source. It would create a pixman image pointing
+- * to some bogus position in memory, but then set a clip region
+- * to the position where the actual bits were.
++static pixman_bool_t out_of_bounds_workaround = TRUE;
++
++/* Old X servers rely on out-of-bounds accesses when they are asked
++ * to composite with a window as the source. They create a pixman image
++ * pointing to some bogus position in memory, but then they set a clip
++ * region to the position where the actual bits are.
+  *
+  * Due to a bug in old versions of pixman, where it would not clip
+  * against the image bounds when a clip region was set, this would
+- * actually work. So when the pixman bug was fixed, a workaround was
+- * added to allow certain out-of-bound accesses. This function disabled
+- * those workarounds.
++ * actually work. So by default we allow certain out-of-bound access
++ * to happen unless explicitly disabled.
+  *
+- * Since 0.21.2, pixman doesn't do these workarounds anymore, so now
+- * this function is a no-op.
++ * Fixed X servers should call this function to disable the workaround.
+  */
+ PIXMAN_EXPORT void
+ pixman_disable_out_of_bounds_workaround (void)
+ {
++    out_of_bounds_workaround = FALSE;
++}
++
++static pixman_bool_t
++source_image_needs_out_of_bounds_workaround (bits_image_t *image)
++{
++    if (image->common.clip_sources                      &&
++        image->common.repeat == PIXMAN_REPEAT_NONE      &&
++	image->common.have_clip_region			&&
++        out_of_bounds_workaround)
++    {
++	if (!image->common.client_clip)
++	{
++	    /* There is no client clip, so if the clip region extends beyond the
++	     * drawable geometry, it must be because the X server generated the
++	     * bogus clip region.
++	     */
++	    const pixman_box32_t *extents =
++		pixman_region32_extents (&image->common.clip_region);
++
++	    if (extents->x1 >= 0 && extents->x2 <= image->width &&
++		extents->y1 >= 0 && extents->y2 <= image->height)
++	    {
++		return FALSE;
++	    }
++	}
++
++	return TRUE;
++    }
++
++    return FALSE;
+ }
+ 
+ static void
+@@ -451,6 +478,9 @@
+ 		flags |= FAST_PATH_IS_OPAQUE;
+ 	}
+ 
++	if (source_image_needs_out_of_bounds_workaround (&image->bits))
++	    flags |= FAST_PATH_NEEDS_WORKAROUND;
++
+ 	if (image->bits.read_func || image->bits.write_func)
+ 	    flags &= ~FAST_PATH_NO_ACCESSORS;
+ 
+Index: pixman/pixman/pixman-private.h
+===================================================================
+--- pixman.orig/pixman/pixman-private.h	2013-03-17 19:01:25.000000000 +0200
++++ pixman/pixman/pixman-private.h	2013-03-17 19:01:25.000000000 +0200
+@@ -687,6 +687,7 @@
+ #define FAST_PATH_SAMPLES_COVER_CLIP_NEAREST	(1 << 23)
+ #define FAST_PATH_SAMPLES_COVER_CLIP_BILINEAR	(1 << 24)
+ #define FAST_PATH_BITS_IMAGE			(1 << 25)
++#define FAST_PATH_NEEDS_WORKAROUND		(1 << 26)
+ 
+ #define FAST_PATH_PAD_REPEAT						\
+     (FAST_PATH_NO_NONE_REPEAT		|				\
+Index: pixman/pixman/pixman.c
+===================================================================
+--- pixman.orig/pixman/pixman.c	2013-03-17 19:01:15.000000000 +0200
++++ pixman/pixman/pixman.c	2013-03-17 19:01:25.000000000 +0200
+@@ -152,6 +152,57 @@
+     return operator_table[op].opaque_info[is_dest_opaque | is_source_opaque];
+ }
+ 
++static void
++apply_workaround (pixman_image_t *image,
++		  int32_t *       x,
++		  int32_t *       y,
++		  uint32_t **     save_bits,
++		  int *           save_dx,
++		  int *           save_dy)
++{
++    if (image && (image->common.flags & FAST_PATH_NEEDS_WORKAROUND))
++    {
++	/* Some X servers generate images that point to the
++	 * wrong place in memory, but then set the clip region
++	 * to point to the right place. Because of an old bug
++	 * in pixman, this would actually work.
++	 *
++	 * Here we try and undo the damage
++	 */
++	int bpp = PIXMAN_FORMAT_BPP (image->bits.format) / 8;
++	pixman_box32_t *extents;
++	uint8_t *t;
++	int dx, dy;
++
++	extents = pixman_region32_extents (&(image->common.clip_region));
++	dx = extents->x1;
++	dy = extents->y1;
++
++	*save_bits = image->bits.bits;
++
++	*x -= dx;
++	*y -= dy;
++	pixman_region32_translate (&(image->common.clip_region), -dx, -dy);
++
++	t = (uint8_t *)image->bits.bits;
++	t += dy * image->bits.rowstride * 4 + dx * bpp;
++	image->bits.bits = (uint32_t *)t;
++
++	*save_dx = dx;
++	*save_dy = dy;
++    }
++}
++
++static void
++unapply_workaround (pixman_image_t *image, uint32_t *bits, int dx, int dy)
++{
++    if (image && (image->common.flags & FAST_PATH_NEEDS_WORKAROUND))
++    {
++	image->bits.bits = bits;
++	pixman_region32_translate (&image->common.clip_region, dx, dy);
++    }
++}
++
+ /*
+  * Computing composite region
+  */
+@@ -576,6 +627,13 @@
+     uint32_t src_flags, mask_flags, dest_flags;
+     pixman_region32_t region;
+     pixman_box32_t extents;
++    uint32_t *src_bits;
++    int src_dx, src_dy;
++    uint32_t *mask_bits;
++    int mask_dx, mask_dy;
++    uint32_t *dest_bits;
++    int dest_dx, dest_dy;
++    pixman_bool_t need_workaround;
+     pixman_implementation_t *imp;
+     pixman_composite_func_t func;
+ 
+@@ -614,6 +672,16 @@
+ 	    src_format = mask_format = PIXMAN_rpixbuf;
+     }
+ 
++    /* Check for workaround */
++    need_workaround = (src_flags | mask_flags | dest_flags) & FAST_PATH_NEEDS_WORKAROUND;
++
++    if (need_workaround)
++    {
++	apply_workaround (src, &src_x, &src_y, &src_bits, &src_dx, &src_dy);
++	apply_workaround (mask, &mask_x, &mask_y, &mask_bits, &mask_dx, &mask_dy);
++	apply_workaround (dest, &dest_x, &dest_y, &dest_bits, &dest_dx, &dest_dy);
++    }
++
+     pixman_region32_init (&region);
+ 
+     if (!_pixman_compute_composite_region32 (
+@@ -707,6 +775,13 @@
+     }
+ 
+ out:
++    if (need_workaround)
++    {
++	unapply_workaround (src, src_bits, src_dx, src_dy);
++	unapply_workaround (mask, mask_bits, mask_dx, mask_dy);
++	unapply_workaround (dest, dest_bits, dest_dx, dest_dy);
++    }
++
+     pixman_region32_fini (&region);
+ }
+ 
+Index: pixman/pixman/pixman.h
+===================================================================
+--- pixman.orig/pixman/pixman.h	2013-03-17 19:01:15.000000000 +0200
++++ pixman/pixman/pixman.h	2013-03-17 19:01:25.000000000 +0200
+@@ -856,23 +856,17 @@
+ 					       int32_t            width,
+ 					       int32_t            height);
+ 
+-/* Executive Summary: This function is a no-op that only exists
+- * for historical reasons.
+- *
+- * There used to be a bug in the X server where it would rely on
+- * out-of-bounds accesses when it was asked to composite with a
+- * window as the source. It would create a pixman image pointing
+- * to some bogus position in memory, but then set a clip region
+- * to the position where the actual bits were.
++/* Old X servers rely on out-of-bounds accesses when they are asked
++ * to composite with a window as the source. They create a pixman image
++ * pointing to some bogus position in memory, but then they set a clip
++ * region to the position where the actual bits are.
+  *
+  * Due to a bug in old versions of pixman, where it would not clip
+  * against the image bounds when a clip region was set, this would
+- * actually work. So when the pixman bug was fixed, a workaround was
+- * added to allow certain out-of-bound accesses. This function disabled
+- * those workarounds.
++ * actually work. So by default we allow certain out-of-bound access
++ * to happen unless explicitly disabled.
+  *
+- * Since 0.21.2, pixman doesn't do these workarounds anymore, so now this
+- * function is a no-op.
++ * Fixed X servers should call this function to disable the workaround.
+  */
+ void pixman_disable_out_of_bounds_workaround (void);
+ 
+Index: pixman/test/Makefile.sources
+===================================================================
+--- pixman.orig/test/Makefile.sources	2013-03-17 19:02:13.000000000 +0200
++++ pixman/test/Makefile.sources	2013-03-17 19:02:59.000000000 +0200
+@@ -7,6 +7,7 @@
+ 	fetch-test		\
+ 	rotate-test		\
+ 	oob-test		\
++	window-test		\
+ 	infinite-loop		\
+ 	trap-crasher		\
+ 	alpha-loop		\
+Index: pixman/test/window-test.c
+===================================================================
+--- /dev/null	1970-01-01 00:00:00.000000000 +0000
++++ pixman/test/window-test.c	2013-03-17 19:05:45.000000000 +0200
+@@ -0,0 +1,173 @@
++#include <stdio.h>
++#include <stdlib.h>
++#include <config.h>
++#include "pixman-private.h"
++#include "pixman.h"
++
++#define FALSE 0
++#define TRUE 1
++
++/* Randomly decide between 32 and 16 bit
++ *
++ * Allocate bits with random width, stride and height
++ *
++ * Then make up some random offset (dx, dy)
++ *
++ * Then make an image with those values.
++ *
++ * Do this for both source and destination
++ *
++ * Composite them together using OVER.
++ *
++ * The bits in the source and the destination should have
++ * recognizable colors so that the result can be verified.
++ *
++ * Ie., walk the bits and verify that they have been composited.
++ */
++
++static int
++get_rand (int bound)
++{
++    return rand () % bound;
++}
++
++static pixman_image_t *
++make_image (int width, int height, pixman_bool_t src, int *rx, int *ry)
++{
++    pixman_format_code_t format;
++    pixman_image_t *image;
++    pixman_region32_t region;
++    uint8_t *bits;
++    int stride;
++    int bpp;
++    int dx, dy;
++    int i, j;
++
++    if (src)
++	format = PIXMAN_a8r8g8b8;
++    else
++	format = PIXMAN_r5g6b5;
++
++    bpp = PIXMAN_FORMAT_BPP (format) / 8;
++
++    stride = width + get_rand (width);
++    stride += (stride & 1);		/* Make it an even number */
++
++    bits = malloc (height * stride * bpp);
++
++    for (j = 0; j < height; ++j)
++    {
++	for (i = 0; i < width; ++i)
++	{
++	    uint8_t *pixel = bits + (stride * j + i) * bpp;
++
++	    if (src)
++		*(uint32_t *)pixel = 0x7f00007f;
++	    else
++		*(uint16_t *)pixel = 0xf100;
++	}
++    }
++
++    dx = dy = 0;
++
++    dx = get_rand (500);
++    dy = get_rand (500);
++
++    if (!src)
++    {
++	/* Now simulate the bogus X server translations */
++	bits -= (dy * stride + dx) * bpp;
++    }
++
++    image = pixman_image_create_bits (
++	format, width, height, (uint32_t *)bits, stride * bpp);
++
++    if (!src)
++    {
++	/* And add the bogus clip region */
++	pixman_region32_init_rect (&region, dx, dy, dx + width, dy + height);
++
++	pixman_image_set_clip_region32 (image, &region);
++    }
++
++    pixman_image_set_source_clipping (image, TRUE);
++
++    if (src)
++    {
++	pixman_transform_t trans;
++
++	pixman_transform_init_identity (&trans);
++
++	pixman_transform_translate (&trans,
++				    NULL,
++				    - pixman_int_to_fixed (width / 2),
++				    - pixman_int_to_fixed (height / 2));
++
++	pixman_transform_scale (&trans,
++				NULL,
++				pixman_double_to_fixed (0.5),
++				pixman_double_to_fixed (0.5));
++
++	pixman_transform_translate (&trans,
++				    NULL,
++				    pixman_int_to_fixed (width / 2),
++				    pixman_int_to_fixed (height / 2));
++
++	pixman_image_set_transform (image, &trans);
++	pixman_image_set_filter (image, PIXMAN_FILTER_BILINEAR, NULL, 0);
++	pixman_image_set_repeat (image, PIXMAN_REPEAT_PAD);
++    }
++
++    if (!src)
++    {
++	*rx = dx;
++	*ry = dy;
++    }
++    else
++    {
++	*rx = *ry = 0;
++    }
++
++    return image;
++}
++
++int
++main ()
++{
++    pixman_image_t *src, *dest;
++    int src_x, src_y, dest_x, dest_y;
++    int i, j;
++    int width = get_rand (499) + 1;
++    int height = get_rand (499) + 1;
++
++    src = make_image (width, height, TRUE, &src_x, &src_y);
++    dest = make_image (width, height, FALSE, &dest_x, &dest_y);
++
++    pixman_image_composite (
++	PIXMAN_OP_OVER, src, NULL, dest,
++	src_x, src_y,
++	-1, -1,
++	dest_x, dest_y,
++	width, height);
++
++    for (i = 0; i < height; ++i)
++    {
++	for (j = 0; j < width; ++j)
++	{
++	    uint8_t *bits = (uint8_t *)dest->bits.bits;
++	    int bpp = PIXMAN_FORMAT_BPP (dest->bits.format) / 8;
++	    int stride = dest->bits.rowstride * 4;
++
++	    uint8_t *pixel =
++		bits + (i + dest_y) * stride + (j + dest_x) * bpp;
++
++	    if (*(uint16_t *)pixel != 0x788f)
++	    {
++		printf ("bad pixel %x\n", *(uint16_t *)pixel);
++		assert (*(uint16_t *)pixel == 0x788f);
++	    }
++	}
++    }
++
++    return 0;
++}
