@@ -3,3 +3,4 @@
 02-workaround-for-a-bug-in-the-1.6-X-server.diff
 03-add-_pixman_bits_override_accessors.patch
 04-ARM-added-NEON-optimizations-for-fetch-store-r5g6b5-.patch
+05-ARM-added-NEON-optimizations-for-fetch-store-a8-scan.patch
