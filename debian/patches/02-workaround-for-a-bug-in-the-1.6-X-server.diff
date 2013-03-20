@@ -1,7 +1,7 @@
 Index: pixman/pixman/pixman-image.c
 ===================================================================
---- pixman.orig/pixman/pixman-image.c	2013-03-17 19:01:15.000000000 +0200
-+++ pixman/pixman/pixman-image.c	2013-03-17 19:01:25.000000000 +0200
+--- pixman.orig/pixman/pixman-image.c	2013-03-20 20:47:35.000000000 +0200
++++ pixman/pixman/pixman-image.c	2013-03-20 20:49:12.000000000 +0200
 @@ -238,27 +238,54 @@
      image->common.have_clip_region = FALSE;
  }
@@ -70,7 +70,7 @@ Index: pixman/pixman/pixman-image.c
  }
  
  static void
-@@ -451,6 +478,9 @@
+@@ -455,6 +482,9 @@
  		flags |= FAST_PATH_IS_OPAQUE;
  	}
  
@@ -82,20 +82,20 @@ Index: pixman/pixman/pixman-image.c
  
 Index: pixman/pixman/pixman-private.h
 ===================================================================
---- pixman.orig/pixman/pixman-private.h	2013-03-17 19:01:25.000000000 +0200
-+++ pixman/pixman/pixman-private.h	2013-03-17 19:01:25.000000000 +0200
-@@ -687,6 +687,7 @@
- #define FAST_PATH_SAMPLES_COVER_CLIP_NEAREST	(1 << 23)
+--- pixman.orig/pixman/pixman-private.h	2013-03-20 20:49:05.000000000 +0200
++++ pixman/pixman/pixman-private.h	2013-03-20 20:49:12.000000000 +0200
+@@ -685,6 +685,7 @@
  #define FAST_PATH_SAMPLES_COVER_CLIP_BILINEAR	(1 << 24)
  #define FAST_PATH_BITS_IMAGE			(1 << 25)
-+#define FAST_PATH_NEEDS_WORKAROUND		(1 << 26)
+ #define FAST_PATH_SEPARABLE_CONVOLUTION_FILTER  (1 << 26)
++#define FAST_PATH_NEEDS_WORKAROUND              (1 << 27)
  
  #define FAST_PATH_PAD_REPEAT						\
      (FAST_PATH_NO_NONE_REPEAT		|				\
 Index: pixman/pixman/pixman.c
 ===================================================================
---- pixman.orig/pixman/pixman.c	2013-03-17 19:01:15.000000000 +0200
-+++ pixman/pixman/pixman.c	2013-03-17 19:01:25.000000000 +0200
+--- pixman.orig/pixman/pixman.c	2013-03-20 20:47:35.000000000 +0200
++++ pixman/pixman/pixman.c	2013-03-20 20:53:12.000000000 +0200
 @@ -152,6 +152,57 @@
      return operator_table[op].opaque_info[is_dest_opaque | is_source_opaque];
  }
@@ -154,8 +154,8 @@ Index: pixman/pixman/pixman.c
  /*
   * Computing composite region
   */
-@@ -576,6 +627,13 @@
-     uint32_t src_flags, mask_flags, dest_flags;
+@@ -583,6 +634,13 @@
+     pixman_format_code_t src_format, mask_format, dest_format;
      pixman_region32_t region;
      pixman_box32_t extents;
 +    uint32_t *src_bits;
@@ -167,13 +167,13 @@ Index: pixman/pixman/pixman.c
 +    pixman_bool_t need_workaround;
      pixman_implementation_t *imp;
      pixman_composite_func_t func;
- 
-@@ -614,6 +672,16 @@
+     pixman_composite_info_t info;
+@@ -624,6 +682,16 @@
  	    src_format = mask_format = PIXMAN_rpixbuf;
      }
  
 +    /* Check for workaround */
-+    need_workaround = (src_flags | mask_flags | dest_flags) & FAST_PATH_NEEDS_WORKAROUND;
++    need_workaround = (info.src_flags | info.mask_flags | info.dest_flags) & FAST_PATH_NEEDS_WORKAROUND;
 +
 +    if (need_workaround)
 +    {
@@ -185,7 +185,7 @@ Index: pixman/pixman/pixman.c
      pixman_region32_init (&region);
  
      if (!_pixman_compute_composite_region32 (
-@@ -707,6 +775,13 @@
+@@ -710,6 +778,13 @@
      }
  
  out:
@@ -201,9 +201,9 @@ Index: pixman/pixman/pixman.c
  
 Index: pixman/pixman/pixman.h
 ===================================================================
---- pixman.orig/pixman/pixman.h	2013-03-17 19:01:15.000000000 +0200
-+++ pixman/pixman/pixman.h	2013-03-17 19:01:25.000000000 +0200
-@@ -856,23 +856,17 @@
+--- pixman.orig/pixman/pixman.h	2013-03-20 20:47:35.000000000 +0200
++++ pixman/pixman/pixman.h	2013-03-20 20:49:12.000000000 +0200
+@@ -907,23 +907,17 @@
  					       int32_t            width,
  					       int32_t            height);
  
@@ -236,9 +236,9 @@ Index: pixman/pixman/pixman.h
  
 Index: pixman/test/Makefile.sources
 ===================================================================
---- pixman.orig/test/Makefile.sources	2013-03-17 19:02:13.000000000 +0200
-+++ pixman/test/Makefile.sources	2013-03-17 19:02:59.000000000 +0200
-@@ -7,6 +7,7 @@
+--- pixman.orig/test/Makefile.sources	2013-03-20 20:49:05.000000000 +0200
++++ pixman/test/Makefile.sources	2013-03-20 20:49:12.000000000 +0200
+@@ -8,6 +8,7 @@
  	fetch-test		\
  	rotate-test		\
  	oob-test		\
@@ -249,7 +249,7 @@ Index: pixman/test/Makefile.sources
 Index: pixman/test/window-test.c
 ===================================================================
 --- /dev/null	1970-01-01 00:00:00.000000000 +0000
-+++ pixman/test/window-test.c	2013-03-17 19:05:45.000000000 +0200
++++ pixman/test/window-test.c	2013-03-20 20:49:12.000000000 +0200
 @@ -0,0 +1,173 @@
 +#include <stdio.h>
 +#include <stdlib.h>
