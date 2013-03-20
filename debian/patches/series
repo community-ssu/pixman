@@ -5,3 +5,4 @@
 04-add-_pixman_bits_override_accessors.patch
 05-ARM-added-NEON-optimizations-for-fetch-store-r5g6b5-.patch
 06-ARM-added-NEON-optimizations-for-fetch-store-a8-scan.patch
+07-use-integer-linear-gradient.patch
