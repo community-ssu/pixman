@@ -33,6 +33,14 @@
 #define L1CACHE_SIZE (8 * 1024)
 #define L2CACHE_SIZE (128 * 1024)
 
+/* This is applied to both L1 and L2 tests - alternatively, you could
+ * parameterise bench_L or split it into two functions. It could be
+ * read at runtime on some architectures, but it only really matters
+ * that it's a number that's an integer divisor of both cacheline
+ * lengths, and further, it only really matters for caches that don't
+ * do allocate0on-write. */
+#define CACHELINE_LENGTH (32) /* bytes */
+
 #define WIDTH  1920
 #define HEIGHT 1080
 #define BUFSIZE (WIDTH * HEIGHT * 4)
@@ -168,18 +176,29 @@ bench_L  (pixman_op_t              op,
           int                      width,
           int                      lines_count)
 {
-    int64_t      i, j;
+    int64_t      i, j, k;
     int          x = 0;
     int          q = 0;
     volatile int qx;
 
     for (i = 0; i < n; i++)
     {
-	/* touch destination buffer to fetch it into L1 cache */
-	for (j = 0; j < width + 64; j += 16) {
-	    q += dst[j];
-	    q += src[j];
-	}
+        /* For caches without allocate-on-write, we need to force the
+         * destination buffer back into the cache on each iteration,
+         * otherwise if they are evicted during the test, they remain
+         * uncached. This doesn't matter for tests which read the
+         * destination buffer, or for caches that do allocate-on-write,
+         * but in those cases this loop just adds constant time, which
+         * should be successfully cancelled out.
+         */
+        for (j = 0; j < lines_count; j++)
+        {
+            for (k = 0; k < width + 62; k += CACHELINE_LENGTH / sizeof *dst)
+            {
+                q += dst[j * WIDTH + k];
+            }
+            q += dst[j * WIDTH + width + 62];
+        }
 	if (++x >= 64)
 	    x = 0;
 	call_func (func, op, src_img, mask_img, dst_img, x, 0, x, 0, 63 - x, 0, width, lines_count);
@@ -616,6 +635,7 @@ tests_tbl[] =
     { "src_n_2x10",            PIXMAN_a2r10g10b10, 1, PIXMAN_OP_SRC,     PIXMAN_null,     0, PIXMAN_x2r10g10b10 },
     { "src_n_2a10",            PIXMAN_a2r10g10b10, 1, PIXMAN_OP_SRC,     PIXMAN_null,     0, PIXMAN_a2r10g10b10 },
     { "src_8888_0565",         PIXMAN_a8r8g8b8,    0, PIXMAN_OP_SRC,     PIXMAN_null,     0, PIXMAN_r5g6b5 },
+    { "src_0565_8888",         PIXMAN_r5g6b5,      0, PIXMAN_OP_SRC,     PIXMAN_null,     0, PIXMAN_a8r8g8b8 },
     { "src_8888_4444",         PIXMAN_a8r8g8b8,    0, PIXMAN_OP_SRC,     PIXMAN_null,     0, PIXMAN_a4r4g4b4 },
     { "src_8888_2222",         PIXMAN_a8r8g8b8,    0, PIXMAN_OP_SRC,     PIXMAN_null,     0, PIXMAN_a2r2g2b2 },
     { "src_8888_2x10",         PIXMAN_a8r8g8b8,    0, PIXMAN_OP_SRC,     PIXMAN_null,     0, PIXMAN_x2r10g10b10 },
@@ -629,6 +649,8 @@ tests_tbl[] =
     { "src_0565_0565",         PIXMAN_r5g6b5,      0, PIXMAN_OP_SRC,     PIXMAN_null,     0, PIXMAN_r5g6b5 },
     { "src_1555_0565",         PIXMAN_a1r5g5b5,    0, PIXMAN_OP_SRC,     PIXMAN_null,     0, PIXMAN_r5g6b5 },
     { "src_0565_1555",         PIXMAN_r5g6b5,      0, PIXMAN_OP_SRC,     PIXMAN_null,     0, PIXMAN_a1r5g5b5 },
+    { "src_8_8",               PIXMAN_a8,          0, PIXMAN_OP_SRC,     PIXMAN_null,     0, PIXMAN_a8 },
+    { "src_n_8",               PIXMAN_a8,          1, PIXMAN_OP_SRC,     PIXMAN_null,     0, PIXMAN_a8 },
     { "src_n_8_0565",          PIXMAN_a8r8g8b8,    1, PIXMAN_OP_SRC,     PIXMAN_a8,       0, PIXMAN_r5g6b5 },
     { "src_n_8_1555",          PIXMAN_a8r8g8b8,    1, PIXMAN_OP_SRC,     PIXMAN_a8,       0, PIXMAN_a1r5g5b5 },
     { "src_n_8_4444",          PIXMAN_a8r8g8b8,    1, PIXMAN_OP_SRC,     PIXMAN_a8,       0, PIXMAN_a4r4g4b4 },
@@ -771,7 +793,7 @@ main (int argc, char *argv[])
 
     for (i = 0; i < ARRAY_LENGTH (tests_tbl); i++)
     {
-	if (strcmp (pattern, "all") == 0 || strstr (tests_tbl[i].testname, pattern))
+	if (strcmp (pattern, "all") == 0 || strcmp (tests_tbl[i].testname, pattern) == 0)
 	{
 	    bench_composite (tests_tbl[i].testname,
 			     tests_tbl[i].src_fmt,
