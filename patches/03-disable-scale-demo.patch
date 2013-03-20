@@ -1,0 +1,14 @@
+Index: pixman/demos/Makefile.am
+===================================================================
+--- pixman.orig/demos/Makefile.am	2013-03-20 21:03:31.000000000 +0200
++++ pixman/demos/Makefile.am	2013-03-20 21:03:48.000000000 +0200
+@@ -24,8 +24,7 @@
+ 	quad2quad		\
+ 	checkerboard		\
+ 	srgb-trap-test		\
+-	srgb-test		\
+-	scale
++	srgb-test
+ 
+ EXTRA_DIST = parrot.c parrot.jpg scale.ui
+ 
