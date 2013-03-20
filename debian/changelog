@@ -1,3 +1,10 @@
+pixman (0.29.2-1+0m5+0cssu0) unstable; urgency=low
+
+  * New upstream release
+  * Revert "use float for linear gradient"
+
+ -- Ivaylo Dimitrov <freemangordon@abv.bg>  Wed, 20 Mar 2013 20:37:12 +0200
+
 pixman (0.28.2+0m5+0cssu1) unstable; urgency=low
 
   * Workaround a bug in 1.6 X server
