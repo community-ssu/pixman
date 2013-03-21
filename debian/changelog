@@ -1,3 +1,9 @@
+pixman (0.29.2-2+0m5+0cssu0) unstable; urgency=low
+
+  * Disable ARM SIMD
+
+ -- Ivaylo Dimitrov <freemangordon@abv.bg>  Wed, 21 Mar 2013 07:09:33 +0200
+
 pixman (0.29.2-1+0m5+0cssu0) unstable; urgency=low
 
   * New upstream release
