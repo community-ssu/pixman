@@ -11,7 +11,7 @@ Vcs-Browser: http://git.debian.org/?p=pkg-xorg/lib/pixman.git
 Package: libpixman-1-0
 Section: libs
 Architecture: any
-Depends: ${shlibs:Depends}
+Depends: ${shlibs:Depends}, kernel-feature-errata-430973-workaround [armel]
 Description: pixel-manipulation library for X and cairo
  A library for manipulating pixel regions -- a set of Y-X banded
  rectangles, image compositing using the Porter/Duff model

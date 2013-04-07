@@ -1,3 +1,9 @@
+pixman (0.29.2-2+0m5+0cssu0+thumb0) unstable; urgency=low
+
+  * Thumb2 compile
+
+ -- Ivaylo Dimitrov <freemangordon@abv.bg>  Sun, 07 Apr 2013 19:27:22 +0300
+
 pixman (0.29.2-2+0m5+0cssu0) unstable; urgency=low
 
   * Disable ARM SIMD
